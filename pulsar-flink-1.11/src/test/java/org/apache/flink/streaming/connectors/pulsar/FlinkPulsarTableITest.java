@@ -14,11 +14,13 @@
 
 package org.apache.flink.streaming.connectors.pulsar;
 
+import org.apache.flink.formats.avro.AvroSerializationSchema;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.pulsar.internal.IncompatibleSchemaException;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarMetadataReader;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarOptions;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarSerializationSchemaWrapper;
 import org.apache.flink.streaming.connectors.pulsar.internal.SimpleSchemaTranslator;
 import org.apache.flink.streaming.connectors.pulsar.testutils.FailingIdentityMapper;
 import org.apache.flink.streaming.connectors.pulsar.testutils.SingletonStreamSink;
@@ -33,6 +35,7 @@ import org.apache.flink.types.Row;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.impl.conf.ClientConfigurationData;
+import org.apache.pulsar.client.impl.schema.AvroSchema;
 import org.apache.pulsar.common.naming.TopicName;
 import org.apache.pulsar.common.schema.SchemaInfo;
 import org.apache.pulsar.common.schema.SchemaType;
@@ -106,19 +109,21 @@ public class FlinkPulsarTableITest extends PulsarTestBaseWithFlink {
         String tableName = TopicName.get(tp).getLocalName();
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
         see.setParallelism(1);
 
+        final org.apache.avro.Schema schema = new org.apache.avro.Schema.Parser()
+                .parse(AvroSchema.of(SchemaData.Foo.class).getAvroSchema().toString());
+        final PulsarSerializationSchemaWrapper schemaWrapper =
+                new PulsarSerializationSchemaWrapper(AvroSerializationSchema.forGeneric(schema),
+                        TopicKeyExtractor.NULL, SchemaData.Foo.class);
         DataStreamSource ds = see.fromCollection(fooList);
         ds.addSink(
                 new FlinkPulsarSink(
-                        serviceUrl, adminUrl, Optional.of(tp), getSinkProperties(), TopicKeyExtractor.NULL,
-                        SchemaData.Foo.class));
+                        serviceUrl, adminUrl, Optional.of(tp), getSinkProperties(), schemaWrapper));
 
         see.execute("write first");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().disableSysoutLogging();
         env.setParallelism(1);
 
         StreamTableEnvironment tEnv = StreamTableEnvironment.create(env);

@@ -15,8 +15,6 @@
 package org.apache.flink.streaming.connectors.pulsar.internal;
 
 import org.apache.flink.annotation.PublicEvolving;
-import org.apache.flink.api.common.serialization.DeserializationSchema;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.util.Collector;
 
@@ -51,7 +49,7 @@ public interface PulsarDeserializationSchema<T> extends Serializable, ResultType
      *
      * @return The deserialized message as an object (null if the message cannot be deserialized).
      */
-    T deserialize(Message<?> message) throws IOException;
+    T deserialize(Message message) throws IOException;
 
     /**
      * Deserializes the Pulsar message.
@@ -63,33 +61,10 @@ public interface PulsarDeserializationSchema<T> extends Serializable, ResultType
      * @param message The message, as a byte array.
      * @param out The collector to put the resulting messages.
      */
-    default void deserialize(Message<?> message, Collector<T> out) throws IOException {
-        out.collect(deserialize(message));
-    }
-
-    /**
-     * Wraps a Flink {@link DeserializationSchema} to a {@link PulsarDeserializationSchema}.
-     *
-     * @param valueDeserializer the deserializer class used to deserialize the value.
-     * @param <V>               the value type.
-     * @return A {@link PulsarDeserializationSchema} that deserialize the value with the given deserializer.
-     */
-    static <V> PulsarDeserializationSchema<V> valueOnly(DeserializationSchema<V> valueDeserializer) {
-        return new PulsarDeserializationSchema<V>() {
-            @Override
-            public V deserialize(Message<?> message) throws IOException {
-                return valueDeserializer.deserialize(message.getData());
-            }
-
-            @Override
-            public boolean isEndOfStream(V nextElement) {
-                return valueDeserializer.isEndOfStream(nextElement);
-            }
-
-            @Override
-            public TypeInformation<V> getProducedType() {
-                return valueDeserializer.getProducedType();
-            }
-        };
+    default void deserialize(Message message, Collector<T> out) throws Exception {
+        T deserialized = deserialize(message);
+        if (deserialized != null) {
+            out.collect(deserialized);
+        }
     }
 }

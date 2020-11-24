@@ -85,38 +85,30 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
 
     protected final String defaultTopic;
 
-    protected final TopicKeyExtractor<T> topicKeyExtractor;
-
     protected transient volatile Throwable failedWrite;
 
     protected transient PulsarAdmin admin;
 
     protected transient BiConsumer<MessageId, Throwable> sendCallback;
 
-    protected transient Producer<?> singleProducer;
+    protected transient Producer<byte[]> singleProducer;
 
-    protected transient Map<String, Producer<?>> topic2Producer;
+    protected transient Map<String, Producer<byte[]>> topic2Producer;
 
     public FlinkPulsarSinkBase(
             String adminUrl,
             Optional<String> defaultTopicName,
             ClientConfigurationData clientConf,
-            Properties properties,
-            TopicKeyExtractor<T> topicKeyExtractor) {
+            Properties properties) {
 
         this.adminUrl = checkNotNull(adminUrl);
 
         if (defaultTopicName.isPresent()) {
             this.forcedTopic = true;
             this.defaultTopic = defaultTopicName.get();
-            this.topicKeyExtractor = topicKeyExtractor == null ?
-                    TopicKeyExtractor.getRebalancedExtractor(defaultTopic) : topicKeyExtractor;
         } else {
             this.forcedTopic = false;
             this.defaultTopic = null;
-            ClosureCleaner.clean(
-                    topicKeyExtractor, ExecutionConfig.ClosureCleanerLevel.RECURSIVE, true);
-            this.topicKeyExtractor = checkNotNull(topicKeyExtractor);
         }
 
         this.clientConfigurationData = clientConf;
@@ -148,7 +140,7 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
             Optional<String> defaultTopicName,
             Properties properties,
             TopicKeyExtractor<T> topicKeyExtractor) {
-        this(adminUrl, defaultTopicName, PulsarClientUtils.newClientConf(checkNotNull(serviceUrl), properties), properties, topicKeyExtractor);
+        this(adminUrl, defaultTopicName, PulsarClientUtils.newClientConf(checkNotNull(serviceUrl), properties), properties);
     }
 
     @Override
@@ -225,22 +217,22 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
         checkErroneous();
     }
 
-    protected <R> Producer<R> getProducer(String topic) {
+    protected Producer<byte[]> getProducer(String topic) {
         if (forcedTopic) {
-            return (Producer<R>) singleProducer;
+            return singleProducer;
         }
 
         if (topic2Producer.containsKey(topic)) {
-            return (Producer<R>) topic2Producer.get(topic);
+            return topic2Producer.get(topic);
         } else {
             uploadSchema(topic);
-            Producer p = createProducer(clientConfigurationData, producerConf, topic, getPulsarSchema());
+            Producer<byte[]> p = createProducer(clientConfigurationData, producerConf, topic, getPulsarSchema());
             topic2Producer.put(topic, p);
-            return (Producer<R>) p;
+            return p;
         }
     }
 
-    protected Producer<?> createProducer(
+    protected Producer<byte[]> createProducer(
             ClientConfigurationData clientConf,
             Map<String, Object> producerConf,
             String topic,
@@ -249,7 +241,7 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
         try {
             return CachedPulsarClient
                     .getOrCreate(clientConf)
-                    .newProducer(schema)
+                    .newProducer(Schema.AUTO_PRODUCE_BYTES(schema))
                     .topic(topic)
                     .batchingMaxPublishDelay(100, TimeUnit.MILLISECONDS)
                     // maximizing the throughput

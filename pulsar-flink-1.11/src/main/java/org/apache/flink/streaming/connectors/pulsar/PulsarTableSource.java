@@ -21,7 +21,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.pulsar.config.StartupMode;
 import org.apache.flink.streaming.connectors.pulsar.internal.IncompatibleSchemaException;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarDeserializationSchema;
-import org.apache.flink.streaming.connectors.pulsar.internal.PulsarDeserializationSchemaWrapper;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarMetadataReader;
 import org.apache.flink.streaming.connectors.pulsar.internal.SchemaTranslator;
 import org.apache.flink.streaming.connectors.pulsar.internal.SimpleSchemaTranslator;
@@ -263,7 +262,7 @@ public class PulsarTableSource
         if (deserializationSchema == null){
             return null;
         }
-        return new PulsarDeserializationSchemaWrapper<>(deserializationSchema);
+        return PulsarDeserializationSchema.valueOnly(deserializationSchema);
     }
 
 }

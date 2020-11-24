@@ -22,29 +22,34 @@ import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.connector.pulsar.PulsarContextAware;
 import org.apache.flink.connector.pulsar.source.MessageSerializer;
+import org.apache.flink.formats.avro.typeutils.AvroSchemaConverter;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarSerializationSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
-import org.apache.flink.util.Preconditions;
 
+import com.google.common.base.Preconditions;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.TypedMessageBuilder;
+import org.apache.pulsar.common.schema.SchemaInfo;
+import org.apache.pulsar.common.schema.SchemaType;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
 
 /**
  * A specific {@link MessageSerializer} for {@link PulsarDynamicTableSink}.
  */
 class DynamicPulsarSerializationSchema
-		implements MessageSerializer<RowData> , PulsarContextAware<RowData> {
+        implements PulsarSerializationSchema<RowData>, PulsarContextAware<RowData> {
 
 	private static final long serialVersionUID = 1L;
-
-	private final @Nullable FlinkKafkaPartitioner<RowData> partitioner;
 
 	private final String topic;
 
@@ -74,22 +79,24 @@ class DynamicPulsarSerializationSchema
 
 	private DataType valueDataType;
 
+	private String valueFormatType;
+
 	DynamicPulsarSerializationSchema(
 			String topic,
-			@Nullable FlinkKafkaPartitioner<RowData> partitioner,
 			@Nullable SerializationSchema<RowData> keySerialization,
 			SerializationSchema<RowData> valueSerialization,
 			RowData.FieldGetter[] keyFieldGetters,
 			RowData.FieldGetter[] valueFieldGetters,
 			boolean hasMetadata,
 			int[] metadataPositions,
-			boolean upsertMode) {
+			boolean upsertMode,
+            DataType valueDataType,
+            String valueFormatType) {
 		if (upsertMode) {
 			Preconditions.checkArgument(keySerialization != null && keyFieldGetters.length > 0,
 					"Key must be set in upsert mode for serialization schema.");
 		}
 		this.topic = topic;
-		this.partitioner = partitioner;
 		this.keySerialization = keySerialization;
 		this.valueSerialization = valueSerialization;
 		this.keyFieldGetters = keyFieldGetters;
@@ -97,21 +104,17 @@ class DynamicPulsarSerializationSchema
 		this.hasMetadata = hasMetadata;
 		this.metadataPositions = metadataPositions;
 		this.upsertMode = upsertMode;
+		this.valueDataType = valueDataType;
+		this.valueFormatType = valueFormatType;
 	}
 
-	@Override
-	public void open(SerializationSchema.InitializationContext context) throws Exception {
-		if (keySerialization != null) {
-			keySerialization.open(context);
-		}
-		valueSerialization.open(context);
-		if (partitioner != null) {
-			partitioner.open(parallelInstanceId, numParallelInstances);
-		}
-	}
+    @Override
+    public void open(SerializationSchema.InitializationContext context) throws Exception {
+        valueSerialization.open(context);
+    }
 
-	@Override
-	public void serialize(RowData consumedRow, TypedMessageBuilder<byte[]> messageBuilder) {
+    @Override
+    public void serialize(RowData consumedRow, TypedMessageBuilder<byte[]> messageBuilder) {
 
 		// shortcut in case no input projection is required
 		if (keySerialization == null && !hasMetadata) {
@@ -120,12 +123,9 @@ class DynamicPulsarSerializationSchema
 			return;
 		}
 
-		final byte[] keySerialized;
-		if (keySerialization == null) {
-			keySerialized = null;
-		} else {
+		if (keySerialization != null) {
 			final RowData keyRow = createProjectedRow(consumedRow, RowKind.INSERT, keyFieldGetters);
-			keySerialized = keySerialization.serialize(keyRow);
+            messageBuilder.keyBytes(keySerialization.serialize(keyRow));
 		}
 
 		final byte[] valueSerialized;
@@ -156,44 +156,63 @@ class DynamicPulsarSerializationSchema
 		}
 	}
 
-	public String getTargetTopic(RowData element) {
-		return topic;
-	}
+    public String getTargetTopic(RowData element) {
+        //TODO need get topic from row.
+        return null;
+    }
 
-	@SuppressWarnings("unchecked")
-	private <T> T readMetadata(RowData consumedRow, PulsarDynamicTableSink.WritableMetadata metadata) {
-		final int pos = metadataPositions[metadata.ordinal()];
-		if (pos < 0) {
-			return null;
-		}
-		return (T) metadata.converter.read(consumedRow, pos);
-	}
+    @SuppressWarnings("unchecked")
+    private <T> T readMetadata(RowData consumedRow, PulsarDynamicTableSink.WritableMetadata metadata) {
+        final int pos = metadataPositions[metadata.ordinal()];
+        if (pos < 0) {
+            return null;
+        }
+        return (T) metadata.converter.read(consumedRow, pos);
+    }
 
-	private Integer extractPartition(RowData consumedRow, @Nullable byte[] keySerialized, byte[] valueSerialized) {
-		if (partitioner != null) {
-			return partitioner.partition(consumedRow, keySerialized, valueSerialized, topic, partitions);
-		}
-		return null;
-	}
+    private static RowData createProjectedRow(RowData consumedRow, RowKind kind, RowData.FieldGetter[] fieldGetters) {
+        final int arity = fieldGetters.length;
+        final GenericRowData genericRowData = new GenericRowData(kind, arity);
+        for (int fieldPos = 0; fieldPos < arity; fieldPos++) {
+            genericRowData.setField(fieldPos, fieldGetters[fieldPos].getFieldOrNull(consumedRow));
+        }
+        return genericRowData;
+    }
 
-	private static RowData createProjectedRow(RowData consumedRow, RowKind kind, RowData.FieldGetter[] fieldGetters) {
-		final int arity = fieldGetters.length;
-		final GenericRowData genericRowData = new GenericRowData(kind, arity);
-		for (int fieldPos = 0; fieldPos < arity; fieldPos++) {
-			genericRowData.setField(fieldPos, fieldGetters[fieldPos].getFieldOrNull(consumedRow));
-		}
-		return genericRowData;
-	}
+    @Override
+    public TypeInformation<RowData> getProducedType() {
+        final RowType rowType = (RowType) valueDataType.getLogicalType();
+        return InternalTypeInfo.of(rowType);
+    }
 
-	@Override
-	public TypeInformation<RowData> getProducedType() {
-		final RowType rowType = (RowType) valueDataType.getLogicalType();
-		return InternalTypeInfo.of(rowType);
-	}
 
-	// --------------------------------------------------------------------------------------------
+    @Override
+    public Schema<?> getSchema() {
+        if (StringUtils.isBlank(valueFormatType)) {
+            return Schema.BYTES;
+        }
+        switch (StringUtils.lowerCase(valueFormatType)) {
+            case "json":
+            case "avro":
+                final RowType rowType = (RowType) valueDataType.getLogicalType();
 
-	interface MetadataConverter extends Serializable {
-		Object read(RowData consumedRow, int pos);
-	}
+                final org.apache.avro.Schema schema = AvroSchemaConverter.convertToSchema(rowType);
+                byte[] schemaBytes = schema.toString().getBytes(StandardCharsets.UTF_8);
+                SchemaInfo si = new SchemaInfo();
+                si.setName("Record");
+                si.setSchema(schemaBytes);
+                si.setType(SchemaType.AVRO);
+                return org.apache.pulsar.client.api.Schema.generic(si);
+            default:
+                throw new UnsupportedOperationException(
+                        "Generic schema is not supported on schema type " + valueFormatType + "'");
+        }
+    }
+
+
+    // --------------------------------------------------------------------------------------------
+
+    interface MetadataConverter extends Serializable {
+        Object read(RowData consumedRow, int pos);
+    }
 }

@@ -29,6 +29,7 @@ import org.apache.pulsar.client.api.schema.GenericRecord;
 import org.apache.pulsar.client.api.schema.GenericRecordBuilder;
 import org.apache.pulsar.client.api.schema.GenericSchema;
 import org.apache.pulsar.client.impl.schema.generic.GenericAvroRecord;
+import org.apache.pulsar.common.schema.SchemaType;
 import org.apache.pulsar.shade.org.apache.avro.Conversions;
 import org.apache.pulsar.shade.org.apache.avro.LogicalType;
 import org.apache.pulsar.shade.org.apache.avro.LogicalTypes;
@@ -162,7 +163,7 @@ public class PulsarSerializer {
         int numFields = fieldsType.size();
 
         return row -> {
-            GenericSchema<GenericRecord> pSchema = SchemaUtils.avroSchema2PulsarSchema(avroStruct);
+            GenericSchema<GenericRecord> pSchema = SchemaUtils.avroSchema2PulsarSchema(avroStruct, SchemaType.AVRO);
             GenericRecordBuilder builder = pSchema.newRecordBuilder();
             Row rowX = (Row) row;
 

@@ -24,6 +24,10 @@ import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.common.IntegerDeserializer;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.formats.avro.AvroDeserializationSchema;
+import org.apache.flink.formats.avro.AvroRowSerializationSchema;
+import org.apache.flink.formats.avro.AvroSerializationSchema;
+import org.apache.flink.formats.avro.typeutils.AvroSchemaConverter;
 import org.apache.flink.runtime.client.JobCancellationException;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -35,7 +39,10 @@ import org.apache.flink.streaming.api.operators.StreamSink;
 import org.apache.flink.streaming.connectors.pulsar.internal.AvroDeser;
 import org.apache.flink.streaming.connectors.pulsar.internal.CachedPulsarClient;
 import org.apache.flink.streaming.connectors.pulsar.internal.JsonDeser;
-import org.apache.flink.streaming.connectors.pulsar.internal.PulsarDeserializationSchemaWrapper;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarDeserializationSchema;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarPrimitiveSchema;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarSerializationSchema;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarSerializationSchemaWrapper;
 import org.apache.flink.streaming.connectors.pulsar.internal.ReaderThread;
 import org.apache.flink.streaming.connectors.pulsar.testutils.FailingIdentityMapper;
 import org.apache.flink.streaming.connectors.pulsar.testutils.SingletonStreamSink;
@@ -63,6 +70,7 @@ import org.apache.pulsar.client.api.MessageId;
 import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.impl.MessageIdImpl;
+import org.apache.pulsar.client.impl.schema.AvroSchema;
 import org.apache.pulsar.common.naming.TopicName;
 import org.apache.pulsar.common.policies.data.PersistentTopicInternalStats;
 import org.apache.pulsar.common.schema.SchemaType;
@@ -122,12 +130,13 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
             Properties props = MapUtils.toProperties(Collections.singletonMap(TOPIC_SINGLE_OPTION_KEY, "tp"));
 
             StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-            see.getConfig().disableSysoutLogging();
+            
             see.setRestartStrategy(RestartStrategies.noRestart());
             see.setParallelism(1);
 
             FlinkPulsarSource<String> source =
-                    new FlinkPulsarSource<String>("sev", "admin", new PulsarDeserializationSchemaWrapper(new SimpleStringSchema()), props).setStartFromEarliest();
+                    new FlinkPulsarSource<String>("sev", "admin",
+                            PulsarDeserializationSchema.valueOnly(new SimpleStringSchema()), props).setStartFromEarliest();
 
             DataStream<String> stream = see.addSource(source);
             stream.print();
@@ -147,13 +156,14 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
 
         sendTypedMessages(tp, SchemaType.INT32, messages, Optional.empty());
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
 
         Properties props = MapUtils.toProperties(Collections.singletonMap(TOPIC_SINGLE_OPTION_KEY, tp));
         props.setProperty("pulsar.reader.receiverQueueSize", "1000000");
 
         FlinkPulsarSource<Integer> source =
-                new FlinkPulsarSource<Integer>(serviceUrl, adminUrl, new PulsarDeserializationSchemaWrapper(new IntegerDeserializer()), props)
+                new FlinkPulsarSource<Integer>(serviceUrl, adminUrl,
+                        new PulsarPrimitiveSchema<>(Integer.class), props)
                         .setStartFromEarliest();
 
         DataStream<Integer> stream = see.addSource(source);
@@ -198,7 +208,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         int numElements = 20;
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(1);
 
         List<String> topics = new ArrayList<>();
@@ -223,7 +233,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         int numElements = 20;
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(3);
 
         List<String> topics = new ArrayList<>();
@@ -236,7 +246,16 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         Properties sinkProp = sinkProperties();
         sinkProp.setProperty(FLUSH_ON_CHECKPOINT_OPTION_KEY, "true");
         sinkProp.setProperty(CLIENT_CACHE_SIZE_OPTION_KEY, "7");
-        stream.addSink(new AssertSink(serviceUrl, adminUrl, 7, sinkProp, intRowWithTopicType()));
+
+        final AvroRowSerializationSchema serializationSchema = new AvroRowSerializationSchema(
+                AvroSchemaConverter.convertToSchema(intRowWithTopicType().getLogicalType()).toString());
+        final PulsarSerializationSchemaWrapper schemaWrapper =
+                new PulsarSerializationSchemaWrapper<>(
+                        serializationSchema,
+                        TopicKeyExtractor.NULL,
+                        Row.class
+                );
+        stream.addSink(new AssertSink(serviceUrl, adminUrl, 7, sinkProp, schemaWrapper));
         see.execute("write with topics");
     }
 
@@ -246,7 +265,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         int numElements = 20;
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(1);
 
         List<String> topics = new ArrayList<>();
@@ -261,7 +280,6 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         see.execute("write with topics");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().disableSysoutLogging();
         Properties sourceProp = sourceProperties();
         sourceProp.setProperty(TOPIC_MULTI_OPTION_KEY, StringUtils.join(topics.toArray(), ','));
         sourceProp.setProperty(USE_EXTEND_FIELD, "true");
@@ -287,7 +305,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         }
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(3);
         see.enableCheckpointing(200);
 
@@ -350,7 +368,6 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
         see.setParallelism(1);
-        see.getConfig().disableSysoutLogging();
         see.setRestartStrategy(RestartStrategies.noRestart());
 
         String subName = UUID.randomUUID().toString();
@@ -358,8 +375,12 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         Properties sourceProps = sourceProperties();
         sourceProps.setProperty(TOPIC_SINGLE_OPTION_KEY, topic);
 
+
+        final PulsarDeserializationSchema<SchemaData.Foo> schemaWrapper =
+                 PulsarDeserializationSchema.valueOnly(AvroDeser.of(SchemaData.Foo.class));
+
         FlinkPulsarSource<SchemaData.Foo> source =
-                new FlinkPulsarSource<>(serviceUrl, adminUrl, new PulsarDeserializationSchemaWrapper(AvroDeser.of(SchemaData.Foo.class)), sourceProps)
+                new FlinkPulsarSource<SchemaData.Foo>(serviceUrl, adminUrl, schemaWrapper, sourceProps)
                 .setStartFromEarliest();
 
         DataStream<Integer> ds = see.addSource(source)
@@ -382,7 +403,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
         see.setParallelism(1);
-        see.getConfig().disableSysoutLogging();
+        
         see.setRestartStrategy(RestartStrategies.noRestart());
 
         String subName = UUID.randomUUID().toString();
@@ -390,8 +411,10 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         Properties sourceProps = sourceProperties();
         sourceProps.setProperty(TOPIC_SINGLE_OPTION_KEY, topic);
 
+
         FlinkPulsarSource<SchemaData.Foo> source =
-                new FlinkPulsarSource<>(serviceUrl, adminUrl, new PulsarDeserializationSchemaWrapper(JsonDeser.of(SchemaData.Foo.class)), sourceProps)
+                new FlinkPulsarSource<>(serviceUrl, adminUrl,
+                        PulsarDeserializationSchema.valueOnly(JsonDeser.of(SchemaData.Foo.class)), sourceProps)
                         .setStartFromEarliest();
 
         DataStream<Integer> ds = see.addSource(source)
@@ -423,7 +446,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         }
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(3);
 
         Properties sourceProps = sourceProperties();
@@ -455,7 +478,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         }
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(3);
 
         Properties sourceProps = sourceProperties();
@@ -517,7 +540,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         offset.put(topic, mids.get(3));
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(1);
 
         Properties sourceProps = sourceProperties();
@@ -548,7 +571,7 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         expectedData.put(topic, new HashSet<>(Arrays.asList(2, 3, 10, 11, 12)));
 
         StreamExecutionEnvironment see = StreamExecutionEnvironment.getExecutionEnvironment();
-        see.getConfig().disableSysoutLogging();
+        
         see.setParallelism(1);
 
         Properties sourceProps = sourceProperties();
@@ -590,7 +613,6 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         env.enableCheckpointing(500);
         env.setParallelism(parallelism);
         env.setRestartStrategy(RestartStrategies.fixedDelayRestart(1, 0));
-        env.getConfig().disableSysoutLogging();
 
         Properties sourceProps = sourceProperties();
         sourceProps.setProperty(TOPIC_MULTI_OPTION_KEY, StringUtils.join(allTopicNames, ','));
@@ -671,7 +693,6 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         env.enableCheckpointing(500);
         env.setParallelism(parallelism);
         env.setRestartStrategy(RestartStrategies.fixedDelayRestart(1, 0));
-        env.getConfig().disableSysoutLogging();
 
         Properties sourceProps = sourceProperties();
         sourceProps.setProperty(TOPIC_MULTI_OPTION_KEY, StringUtils.join(allTopicNames, ','));
@@ -702,7 +723,6 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(parallelism);
         env.enableCheckpointing(100);
-        env.getConfig().disableSysoutLogging();
 
         Properties prop = sourceProperties();
         prop.setProperty(TOPIC_SINGLE_OPTION_KEY, tp);
@@ -766,7 +786,6 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(parallelism);
         env.enableCheckpointing(100);
-        env.getConfig().disableSysoutLogging();
 
         Properties prop = sourceProperties();
         prop.setProperty(TOPIC_SINGLE_OPTION_KEY, tp);
@@ -887,14 +906,27 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
 
     private void produceIntoPulsar(DataStream<Row> stream, DataType dt, Properties props) {
         props.setProperty(FLUSH_ON_CHECKPOINT_OPTION_KEY, "true");
-        stream.addSink(new FlinkPulsarRowSink(serviceUrl, adminUrl, Optional.empty(), props, dt));
+
+        final AvroRowSerializationSchema serializationSchema = new AvroRowSerializationSchema(
+                AvroSchemaConverter.convertToSchema(dt.getLogicalType()).toString());
+        final PulsarSerializationSchemaWrapper schemaWrapper =
+                new PulsarSerializationSchemaWrapper<>(
+                        serializationSchema,
+                        TopicKeyExtractor.NULL,
+                        Row.class
+                );
+        stream.addSink(new FlinkPulsarSink(serviceUrl, adminUrl, Optional.empty(), props, schemaWrapper));
     }
 
-    private static class AssertSink extends FlinkPulsarRowSink {
+    private static class AssertSink<T> extends FlinkPulsarSink<T> {
 
         private final int cacheSize;
 
-        public AssertSink(String serviceUrl, String adminUrl, int cacheSize, Properties properties, DataType dataType) {
+        public AssertSink(String serviceUrl, String adminUrl, int cacheSize, Properties properties,
+                          PulsarSerializationSchema<T> dataType) {
+
+
+
             super(serviceUrl, adminUrl, Optional.empty(), properties, dataType);
             this.cacheSize = cacheSize;
         }
@@ -1040,7 +1072,6 @@ public class FlinkPulsarITest extends PulsarTestBaseWithFlink {
             int numElements,
             boolean randomizedOrder) throws Exception {
         see.setParallelism(numPartitions);
-        see.getConfig().disableSysoutLogging();
         see.setRestartStrategy(RestartStrategies.noRestart());
 
         DataStream stream = see.addSource(new RandomizedIntegerSeq(tp, numPartitions, numElements, randomizedOrder));

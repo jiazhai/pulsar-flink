@@ -17,8 +17,7 @@ package org.apache.flink.connector.pulsar.table;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.connectors.pulsar.FlinkPulsarSink;
-import org.apache.flink.streaming.connectors.pulsar.TopicKeyExtractor;
-import org.apache.flink.streaming.connectors.pulsar.config.RecordSchemaType;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarSerializationSchema;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.format.EncodingFormat;
@@ -29,12 +28,15 @@ import org.apache.flink.table.data.ArrayData;
 import org.apache.flink.table.data.MapData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.utils.DataTypeUtils;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.pulsar.client.impl.conf.ClientConfigurationData;
+
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,10 +76,21 @@ public class PulsarDynamicTableSink implements DynamicTableSink, SupportsWriting
      */
     protected final Properties properties;
 
+    /** Optional format for encoding keys to Kafka. */
+    protected final @Nullable EncodingFormat<SerializationSchema<RowData>> keyEncodingFormat;
     /**
      * Sink format for encoding records to pulsar.
      */
-    protected final EncodingFormat<SerializationSchema<RowData>> encodingFormat;
+    protected final EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat;
+
+    /** Indices that determine the key fields and the source position in the consumed row. */
+    protected final int[] keyProjection;
+
+    /** Indices that determine the value fields and the source position in the consumed row. */
+    protected final int[] valueProjection;
+
+    /** Prefix that needs to be removed from fields when constructing the physical data type. */
+    protected final @Nullable String keyPrefix;
 
     /** Sink commit semantic. */
     protected final PulsarSinkSemantic semantic;
@@ -88,7 +101,11 @@ public class PulsarDynamicTableSink implements DynamicTableSink, SupportsWriting
             String topic,
             DataType physicalDataType,
             Properties properties,
-            EncodingFormat<SerializationSchema<RowData>> encodingFormat,
+            @Nullable EncodingFormat<SerializationSchema<RowData>> keyEncodingFormat,
+            EncodingFormat<SerializationSchema<RowData>> valueEncodingFormat,
+            int[] keyProjection,
+            int[] valueProjection,
+            @Nullable String keyPrefix,
             PulsarSinkSemantic semantic) {
         this.serviceUrl = Preconditions.checkNotNull(serviceUrl, "serviceUrl data type must not be null.");
         this.adminUrl = Preconditions.checkNotNull(adminUrl, "adminUrl data type must not be null.");
@@ -97,42 +114,92 @@ public class PulsarDynamicTableSink implements DynamicTableSink, SupportsWriting
         // Mutable attributes
         this.metadataKeys = Collections.emptyList();
         this.properties = Preconditions.checkNotNull(properties, "Properties must not be null.");
-        this.encodingFormat = Preconditions.checkNotNull(encodingFormat, "Encoding format must not be null.");
+        this.keyEncodingFormat = keyEncodingFormat;
+        this.valueEncodingFormat = Preconditions.checkNotNull(valueEncodingFormat, "Encoding format must not be null.");
+        this.keyProjection = Preconditions.checkNotNull(keyProjection, "Key projection must not be null.");
+        this.valueProjection = Preconditions.checkNotNull(valueProjection, "Value projection must not be null.");
+        this.keyPrefix = keyPrefix;
         this.semantic = Preconditions.checkNotNull(semantic, "Semantic must not be null.");
     }
 
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        return this.encodingFormat.getChangelogMode();
+        return this.valueEncodingFormat.getChangelogMode();
     }
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
-//       must valueProjection type is int[]
+
+        final SerializationSchema<RowData> keySerialization =
+                createSerialization(context, keyEncodingFormat, keyProjection, keyPrefix);
+
         final SerializationSchema<RowData> valueSerialization =
-                createSerialization(context, encodingFormat, new int[]{}, null);
+                createSerialization(context, valueEncodingFormat, valueProjection, null);
+
+        final PulsarSerializationSchema<RowData> pulsarSerializer =
+                createPulsarSerializer(keySerialization, valueSerialization);
 
         final SinkFunction<RowData> pulsarSink = createPulsarSink(
                 this.topic,
                 this.properties,
-                valueSerialization);
+                pulsarSerializer);
 
         return SinkFunctionProvider.of(pulsarSink);
     }
 
+    private PulsarSerializationSchema<RowData> createPulsarSerializer(SerializationSchema<RowData> keySerialization,
+                                                                      SerializationSchema<RowData> valueSerialization) {
+        final List<LogicalType> physicalChildren = physicalDataType.getLogicalType().getChildren();
+
+        final RowData.FieldGetter[] keyFieldGetters = Arrays.stream(keyProjection)
+                .mapToObj(targetField -> RowData.createFieldGetter(physicalChildren.get(targetField), targetField))
+                .toArray(RowData.FieldGetter[]::new);
+
+        final RowData.FieldGetter[] valueFieldGetters = Arrays.stream(valueProjection)
+                .mapToObj(targetField -> RowData.createFieldGetter(physicalChildren.get(targetField), targetField))
+                .toArray(RowData.FieldGetter[]::new);
+
+        // determine the positions of metadata in the consumed row
+        final int[] metadataPositions = Stream.of(WritableMetadata.values())
+                .mapToInt(m -> {
+                    final int pos = metadataKeys.indexOf(m.key);
+                    if (pos < 0) {
+                        return -1;
+                    }
+                    return physicalChildren.size() + pos;
+                })
+                .toArray();
+
+        // check if metadata is used at all
+        final boolean hasMetadata = metadataKeys.size() > 0;
+
+        final DynamicPulsarSerializationSchema pulsarSerializer = new DynamicPulsarSerializationSchema(
+                topic,
+                keySerialization,
+                valueSerialization,
+                keyFieldGetters,
+                valueFieldGetters,
+                hasMetadata,
+                metadataPositions,
+                false,
+                physicalDataType,
+                "");
+        return pulsarSerializer;
+    }
+
     private SinkFunction<RowData> createPulsarSink(String topic, Properties properties,
-                                                   SerializationSchema<RowData> serializationSchema) {
+                                                   PulsarSerializationSchema<RowData> pulsarSerializer) {
         switch (semantic){
             case AT_LEAST_ONCE:
             case NONE:
+                final ClientConfigurationData configurationData = new ClientConfigurationData();
+                configurationData.setServiceUrl(serviceUrl);
                 return new FlinkPulsarSink<RowData>(
-                        serviceUrl,
                         adminUrl,
                         Optional.ofNullable(topic),
+                        configurationData,
                         properties,
-                        TopicKeyExtractor.NULL,
-                        RowData.class,
-                        RecordSchemaType.AVRO
+                        pulsarSerializer
                 );
             case EXACTLY_ONCE:
             default:
@@ -164,7 +231,11 @@ public class PulsarDynamicTableSink implements DynamicTableSink, SupportsWriting
                 this.topic,
                 this.physicalDataType,
                 this.properties,
-                this.encodingFormat,
+                this.keyEncodingFormat,
+                this.valueEncodingFormat,
+                this.keyProjection,
+                this.valueProjection,
+                this.keyPrefix,
                 this.semantic);
     }
 
@@ -182,16 +253,26 @@ public class PulsarDynamicTableSink implements DynamicTableSink, SupportsWriting
             return false;
         }
         PulsarDynamicTableSink that = (PulsarDynamicTableSink) o;
-        return physicalDataType.equals(that.physicalDataType) &&
+        return Objects.equals(metadataKeys, that.metadataKeys) &&
+                Objects.equals(physicalDataType, that.physicalDataType) &&
                 Objects.equals(topic, that.topic) &&
-                serviceUrl.equals(that.serviceUrl) &&
-                adminUrl.equals(that.adminUrl) &&
-                encodingFormat.equals(that.encodingFormat);
+                Objects.equals(serviceUrl, that.serviceUrl) &&
+                Objects.equals(adminUrl, that.adminUrl) &&
+                Objects.equals(keyEncodingFormat, that.keyEncodingFormat) &&
+                Objects.equals(valueEncodingFormat, that.valueEncodingFormat) &&
+                Arrays.equals(keyProjection, that.keyProjection) &&
+                Arrays.equals(valueProjection, that.valueProjection) &&
+                Objects.equals(keyPrefix, that.keyPrefix) &&
+                semantic == that.semantic;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(physicalDataType, topic, serviceUrl, adminUrl, encodingFormat);
+        int result = Objects.hash(metadataKeys, physicalDataType, topic, serviceUrl, adminUrl, keyEncodingFormat,
+                valueEncodingFormat, keyPrefix, semantic);
+        result = 31 * result + Arrays.hashCode(keyProjection);
+        result = 31 * result + Arrays.hashCode(valueProjection);
+        return result;
     }
 
     @Override
@@ -220,7 +301,7 @@ public class PulsarDynamicTableSink implements DynamicTableSink, SupportsWriting
                     final ArrayData keyArray = map.keyArray();
                     final ArrayData valueArray = map.valueArray();
 
-                    final Properties properties = new Properties(keyArray.size());
+                    final Properties properties = new Properties();
                     for (int i = 0; i < keyArray.size(); i++) {
                         if (!keyArray.isNullAt(i) && !valueArray.isNullAt(i)) {
                             final String key = keyArray.getString(i).toString();
@@ -250,7 +331,6 @@ public class PulsarDynamicTableSink implements DynamicTableSink, SupportsWriting
                     }
                     return row.getString(pos).toString();
                 });
-
         final String key;
 
         final DataType dataType;

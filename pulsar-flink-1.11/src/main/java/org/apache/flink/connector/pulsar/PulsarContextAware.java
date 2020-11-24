@@ -20,9 +20,12 @@ package org.apache.flink.connector.pulsar;
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 
+import org.apache.pulsar.client.api.Schema;
+
+
 /**
  * An interface for {@link DynamicPulsarSerializationSchema dynamicPulsarSerializationSchema} that need information
- * about the context where the Kafka Producer is running along with information about the available
+ * about the context where the Pulsar Producer is running along with information about the available
  * partitions.
  *
  * <p>You only need to override the methods for the information that you need. However, {@link
@@ -56,4 +59,7 @@ public interface PulsarContextAware<T> extends ResultTypeQueryable<T> {
 	 * Returns the topic that the presented element should be sent to.
 	 */
 	String getTargetTopic(T element);
+
+
+	Schema<?> getSchema();
 }

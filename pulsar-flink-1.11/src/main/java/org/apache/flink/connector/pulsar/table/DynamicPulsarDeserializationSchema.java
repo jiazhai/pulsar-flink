@@ -21,6 +21,7 @@ package org.apache.flink.connector.pulsar.table;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.connector.pulsar.source.MessageDeserializer;
+import org.apache.flink.streaming.connectors.pulsar.internal.PulsarDeserializationSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.DeserializationException;
@@ -38,9 +39,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A specific {@link MessageDeserializer} for {@link PulsarDynamicTableSource}.
+ * A specific {@link PulsarDeserializationSchema} for {@link PulsarDynamicTableSource}.
  */
-class DynamicPulsarDeserializationSchema implements MessageDeserializer<RowData> {
+class DynamicPulsarDeserializationSchema implements PulsarDeserializationSchema<RowData> {
 
 	private static final long serialVersionUID = 1L;
 

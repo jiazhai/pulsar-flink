@@ -156,12 +156,12 @@ public class SchemaUtils {
         }
     }
 
-    static GenericSchema<GenericRecord> avroSchema2PulsarSchema(Schema avroSchema) {
+    static GenericSchema<GenericRecord> avroSchema2PulsarSchema(Schema avroSchema, SchemaType type) {
         byte[] schemaBytes = avroSchema.toString().getBytes(StandardCharsets.UTF_8);
         SchemaInfo si = new SchemaInfo();
         si.setName("Avro");
         si.setSchema(schemaBytes);
-        si.setType(SchemaType.AVRO);
+        si.setType(type);
         return org.apache.pulsar.client.api.Schema.generic(si);
     }
 

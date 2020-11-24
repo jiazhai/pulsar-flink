@@ -34,6 +34,8 @@ import java.io.Serializable;
 @PublicEvolving
 public interface PulsarDeserializationSchema<T> extends Serializable, ResultTypeQueryable<T> {
 
+    default void open(DeserializationSchema.InitializationContext context) throws Exception{
+    };
     /**
      * Method to decide whether the element signals the end of the stream. If
      * true is returned the element won't be emitted.
@@ -47,15 +49,6 @@ public interface PulsarDeserializationSchema<T> extends Serializable, ResultType
     /**
      * Deserializes the Pulsar message.
      *
-     * @param message Pulsar message to be deserialized.
-     *
-     * @return The deserialized message as an object (null if the message cannot be deserialized).
-     */
-    T deserialize(Message<?> message) throws IOException;
-
-    /**
-     * Deserializes the Pulsar message.
-     *
      * <p>Can output multiple records through the {@link Collector}. Note that number and size of the
      * produced records should be relatively small. Depending on the source implementation records
      * can be buffered in memory or collecting records might delay emitting checkpoint barrier.
@@ -63,9 +56,7 @@ public interface PulsarDeserializationSchema<T> extends Serializable, ResultType
      * @param message The message, as a byte array.
      * @param out The collector to put the resulting messages.
      */
-    default void deserialize(Message<?> message, Collector<T> out) throws IOException {
-        out.collect(deserialize(message));
-    }
+    void deserialize(Message<?> message, Collector<T> out) throws IOException;
 
     /**
      * Wraps a Flink {@link DeserializationSchema} to a {@link PulsarDeserializationSchema}.
@@ -77,8 +68,8 @@ public interface PulsarDeserializationSchema<T> extends Serializable, ResultType
     static <V> PulsarDeserializationSchema<V> valueOnly(DeserializationSchema<V> valueDeserializer) {
         return new PulsarDeserializationSchema<V>() {
             @Override
-            public V deserialize(Message<?> message) throws IOException {
-                return valueDeserializer.deserialize(message.getData());
+            public void deserialize(Message<?> message, Collector<V> collector) throws IOException {
+                valueDeserializer.deserialize(message.getData(), collector);
             }
 
             @Override

@@ -15,6 +15,7 @@
 package org.apache.flink.streaming.connectors.pulsar;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
+import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.streaming.connectors.pulsar.config.StartupMode;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarCatalogSupport;
 import org.apache.flink.table.api.TableException;
@@ -25,6 +26,7 @@ import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.descriptors.PulsarValidator;
 import org.apache.flink.table.descriptors.SchemaValidator;
 import org.apache.flink.table.factories.DeserializationSchemaFactory;
+import org.apache.flink.table.factories.SerializationSchemaFactory;
 import org.apache.flink.table.factories.StreamTableSinkFactory;
 import org.apache.flink.table.factories.StreamTableSourceFactory;
 import org.apache.flink.table.factories.TableFactoryService;
@@ -125,6 +127,7 @@ public class PulsarTableSourceSinkFactory
                 checkForCustomFieldMapping(dp, schema)) {
             throw new TableException("Time attributes and custom field mappings are not supported yet.");
         }
+        final SerializationSchema<Row> serializationSchema = getSerializationSchema(properties);
 
         Properties sinkProp;
         if (isInPulsarCatalog) {
@@ -137,7 +140,7 @@ public class PulsarTableSourceSinkFactory
 
         Properties result = removeConnectorPrefix(sinkProp);
 
-        return new PulsarTableSink(serviceUrl, adminUrl, schema, Optional.of(topic), result);
+        return new PulsarTableSink(serviceUrl, adminUrl, schema, Optional.of(topic), result, serializationSchema);
     }
 
     @Override
@@ -389,17 +392,21 @@ public class PulsarTableSourceSinkFactory
         private String externalSubscriptionName;
     }
 
+    private SerializationSchema<Row> getSerializationSchema(Map<String, String> properties) {
+        @SuppressWarnings("unchecked")
+        final SerializationSchemaFactory<Row> formatFactory = TableFactoryService.find(
+                SerializationSchemaFactory.class,
+                properties,
+                this.getClass().getClassLoader());
+        return formatFactory.createSerializationSchema(properties);
+    }
+
     private DeserializationSchema<Row> getDeserializationSchema(Map<String, String> properties) {
-        try {
-            @SuppressWarnings("unchecked")
-            final DeserializationSchemaFactory<Row> formatFactory = TableFactoryService.find(
-                    DeserializationSchemaFactory.class,
-                    properties,
-                    this.getClass().getClassLoader());
-            return formatFactory.createDeserializationSchema(properties);
-        } catch (Exception e) {
-            log.warn("get deserializer from properties failed. using pulsar inner schema instead.");
-            return null;
-        }
+        @SuppressWarnings("unchecked")
+        final DeserializationSchemaFactory<Row> formatFactory = TableFactoryService.find(
+                DeserializationSchemaFactory.class,
+                properties,
+                this.getClass().getClassLoader());
+        return formatFactory.createDeserializationSchema(properties);
     }
 }
