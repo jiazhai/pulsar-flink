@@ -68,14 +68,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
-import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
-import static org.apache.flink.util.ComponentClosingUtils.closeWithTimeout;
+import static org.apache.flink.connector.pulsar.source.util.ComponentClosingUtils.closeWithTimeout;
 
 /**
  * A {@link SplitReader} implementation that reads records from Pulsar partitions.

@@ -25,6 +25,7 @@ import org.apache.flink.connector.pulsar.source.split.PulsarPartitionSplit;
 import org.apache.flink.util.function.RunnableWithException;
 
 import java.util.Collection;
+import java.util.Map;
 import java.util.function.Supplier;
 
 /**
@@ -46,14 +47,16 @@ public class PulsarSourceReader<T>
         this.closeCallback = closeCallback;
     }
 
-    @Override
-    protected void onSplitFinished(Collection<String> finishedSplitIds) {
-    }
 
     @Override
     public void close() throws Exception {
         super.close();
         closeCallback.run();
+    }
+
+    @Override
+    protected void onSplitFinished(Map<String, PulsarPartitionSplit> map) {
+
     }
 
     @Override

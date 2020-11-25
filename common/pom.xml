@@ -24,10 +24,6 @@
     <artifactId>pulsar-flink-connector-common</artifactId>
     <packaging>jar</packaging>
 
-    <properties>
-        <flink.version>1.12-SNAPSHOT</flink.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>io.streamnative.connectors</groupId>

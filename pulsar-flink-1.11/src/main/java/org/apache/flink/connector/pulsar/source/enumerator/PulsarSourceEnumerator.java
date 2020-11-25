@@ -47,7 +47,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.util.ComponentClosingUtils.closeWithTimeout;
+import static org.apache.flink.connector.pulsar.source.util.ComponentClosingUtils.closeWithTimeout;
 
 /**
  * The enumerator class for pulsar source.

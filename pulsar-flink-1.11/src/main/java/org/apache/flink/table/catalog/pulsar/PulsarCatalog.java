@@ -14,11 +14,11 @@
 
 package org.apache.flink.table.catalog.pulsar;
 
-import org.apache.flink.streaming.connectors.pulsar.PulsarTableSourceSinkFactory;
 import org.apache.flink.streaming.connectors.pulsar.internal.IncompatibleSchemaException;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarCatalogSupport;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarOptions;
 import org.apache.flink.streaming.connectors.pulsar.internal.SimpleSchemaTranslator;
+import org.apache.flink.streaming.connectors.pulsar.table.PulsarDynamicTableFactory;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
@@ -40,7 +40,7 @@ import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
-import org.apache.flink.table.factories.TableFactory;
+import org.apache.flink.table.factories.Factory;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pulsar.client.admin.PulsarAdminException;
@@ -78,10 +78,10 @@ public class PulsarCatalog extends GenericInMemoryCatalog {
     }
 
     @Override
-    public Optional<TableFactory> getTableFactory() {
+    public Optional<Factory> getFactory() {
         Properties props = new Properties();
         props.putAll(properties);
-        return Optional.of(new PulsarTableSourceSinkFactory(props));
+        return Optional.of(new PulsarDynamicTableFactory());
     }
 
     @Override

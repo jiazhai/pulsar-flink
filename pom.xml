@@ -18,8 +18,7 @@
   <packaging>pom</packaging>
   <modules>
     <module>managed-ledger-shaded</module>
-    <module>common</module>
-    <module>pulsar-flink-1.9</module>
+<!--    <module>common</module>-->
     <module>pulsar-flink-1.11</module>
   </modules>
 
@@ -71,7 +70,7 @@
     <redirectTestOutputToFile>true</redirectTestOutputToFile>
     <testRetryCount>2</testRetryCount>
     <scala.binary.version>2.11</scala.binary.version>
-
+    <flink.version>1.12-SNAPSHOT</flink.version>
     <!-- use Pulsar stable version -->
     <pulsar.version>2.6.0-sn-18-2</pulsar.version>
     <streamnative-tests.version>2.5.1</streamnative-tests.version>

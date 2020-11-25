@@ -91,9 +91,9 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
 
     protected transient BiConsumer<MessageId, Throwable> sendCallback;
 
-    protected transient Producer<byte[]> singleProducer;
+    protected transient Producer<T> singleProducer;
 
-    protected transient Map<String, Producer<byte[]>> topic2Producer;
+    protected transient Map<String, Producer<T>> topic2Producer;
 
     public FlinkPulsarSinkBase(
             String adminUrl,
@@ -162,7 +162,7 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
     public void initializeState(FunctionInitializationContext context) throws Exception {
     }
 
-    protected abstract Schema<?> getPulsarSchema();
+    protected abstract Schema<T> getPulsarSchema();
 
     @Override
     public void open(Configuration parameters) throws Exception {
@@ -217,7 +217,7 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
         checkErroneous();
     }
 
-    protected Producer<byte[]> getProducer(String topic) {
+    protected Producer<T> getProducer(String topic) {
         if (forcedTopic) {
             return singleProducer;
         }
@@ -226,22 +226,22 @@ abstract class FlinkPulsarSinkBase<T> extends RichSinkFunction<T> implements Che
             return topic2Producer.get(topic);
         } else {
             uploadSchema(topic);
-            Producer<byte[]> p = createProducer(clientConfigurationData, producerConf, topic, getPulsarSchema());
+            Producer<T> p = createProducer(clientConfigurationData, producerConf, topic, getPulsarSchema());
             topic2Producer.put(topic, p);
             return p;
         }
     }
 
-    protected Producer<byte[]> createProducer(
+    protected Producer<T> createProducer(
             ClientConfigurationData clientConf,
             Map<String, Object> producerConf,
             String topic,
-            Schema<?> schema) {
+            Schema<T> schema) {
 
         try {
             return CachedPulsarClient
                     .getOrCreate(clientConf)
-                    .newProducer(Schema.AUTO_PRODUCE_BYTES(schema))
+                    .newProducer(schema)
                     .topic(topic)
                     .batchingMaxPublishDelay(100, TimeUnit.MILLISECONDS)
                     // maximizing the throughput

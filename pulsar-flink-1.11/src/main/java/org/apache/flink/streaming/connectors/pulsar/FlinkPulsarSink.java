@@ -14,10 +14,8 @@
 
 package org.apache.flink.streaming.connectors.pulsar;
 
-import org.apache.flink.connector.pulsar.PulsarContextAware;
-import org.apache.flink.streaming.connectors.pulsar.config.RecordSchemaType;
 import org.apache.flink.streaming.connectors.pulsar.internal.PulsarClientUtils;
-import org.apache.flink.streaming.connectors.pulsar.internal.PulsarSerializationSchema;
+import org.apache.flink.streaming.util.serialization.PulsarSerializationSchema;
 
 import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.TypedMessageBuilder;
@@ -61,30 +59,21 @@ public class FlinkPulsarSink<T> extends FlinkPulsarSinkBase<T> {
     }
 
     @Override
-    protected Schema<?> getPulsarSchema() {
-        if (serializer instanceof PulsarContextAware) {
-            return ((PulsarContextAware<?>) serializer).getSchema();
-        } else {
-            return Schema.BYTES;
-        }
+    protected Schema<T> getPulsarSchema() {
+        return serializer.getSchema();
     }
 
     @Override
     public void invoke(T value, Context context) throws Exception {
         checkErroneous();
         initializeSendCallback();
-
-        String topic = defaultTopic;
-        if (serializer instanceof PulsarContextAware) {
-            topic = ((PulsarContextAware<T>) serializer).getTargetTopic(value);
-            if (topic == null) {
-                if (failOnWrite) {
+        final Optional<String> targetTopic = serializer.getTargetTopic(value);
+        if (!targetTopic.isPresent() && failOnWrite ) {
                     throw new NullPointerException("no topic present in the data.");
-                }
-                return;
-            }
+
         }
-        TypedMessageBuilder<byte[]> mb = getProducer(topic).newMessage();
+        String topic = targetTopic.orElse(defaultTopic);
+        TypedMessageBuilder<T> mb = getProducer(topic).newMessage();
         serializer.serialize(value, mb);
 
         if (flushOnCheckpoint) {
