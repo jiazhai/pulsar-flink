@@ -38,7 +38,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class ReaderThread<T> extends Thread {
 
-    protected final PulsarFetcher owner;
+    protected final PulsarFetcher<T> owner;
     protected final PulsarTopicState state;
     protected final ClientConfigurationData clientConf;
     protected final Map<String, Object> readerConf;
@@ -52,10 +52,10 @@ public class ReaderThread<T> extends Thread {
 
     protected final PulsarDeserializationSchema<T> deserializer;
 
-    protected volatile Reader<?> reader = null;
+    protected volatile Reader<T> reader = null;
 
     public ReaderThread(
-            PulsarFetcher owner,
+            PulsarFetcher<T> owner,
             PulsarTopicState state,
             ClientConfigurationData clientConf,
             Map<String, Object> readerConf,
@@ -75,7 +75,7 @@ public class ReaderThread<T> extends Thread {
     }
 
     public ReaderThread(
-            PulsarFetcher owner,
+            PulsarFetcher<T> owner,
             PulsarTopicState state,
             ClientConfigurationData clientConf,
             Map<String, Object> readerConf,
@@ -99,7 +99,7 @@ public class ReaderThread<T> extends Thread {
             log.info("Starting to read {} with reader thread {}", topicRange, getName());
 
             while (running) {
-                Message message = reader.readNext(pollTimeoutMs, TimeUnit.MILLISECONDS);
+                Message<T> message = reader.readNext(pollTimeoutMs, TimeUnit.MILLISECONDS);
                 if (message != null) {
                     emitRecord(message);
                 }
@@ -118,9 +118,9 @@ public class ReaderThread<T> extends Thread {
     }
 
     protected void createActualReader() throws org.apache.pulsar.client.api.PulsarClientException, ExecutionException {
-        ReaderBuilder<?> readerBuilder = CachedPulsarClient
+        ReaderBuilder<T> readerBuilder = CachedPulsarClient
                 .getOrCreate(clientConf)
-                .newReader()
+                .newReader(deserializer.getSchema())
                 .topic(topicRange.getTopic())
                 .startMessageId(startMessageId)
                 .startMessageIdInclusive()

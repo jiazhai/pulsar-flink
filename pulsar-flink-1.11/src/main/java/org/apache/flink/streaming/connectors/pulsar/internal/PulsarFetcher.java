@@ -117,7 +117,7 @@ public class PulsarFetcher<T> {
     private volatile boolean running = true;
 
     /** The threads that runs the actual reading and hand the records to this fetcher. */
-    private Map<TopicRange, ReaderThread> topicToThread;
+    private Map<TopicRange, ReaderThread<T>> topicToThread;
 
     /** Failed or not when data loss. **/
     private boolean failOnDataLoss = true;
@@ -528,13 +528,13 @@ public class PulsarFetcher<T> {
         return state;
     }
 
-    public Map<TopicRange, ReaderThread> createAndStartReaderThread(
+    public Map<TopicRange, ReaderThread<T>> createAndStartReaderThread(
             List<PulsarTopicState> states,
             ExceptionProxy exceptionProxy) {
 
         Map<TopicRange, MessageId> startingOffsets = states.stream().collect(Collectors.toMap(PulsarTopicState::getTopicRange, PulsarTopicState::getOffset));
         metadataReader.setupCursor(startingOffsets, failOnDataLoss);
-        Map<TopicRange, ReaderThread> topic2Threads = new HashMap<>();
+        Map<TopicRange, ReaderThread<T>> topic2Threads = new HashMap<>();
 
         for (PulsarTopicState state : states) {
             ReaderThread<T> readerT = createReaderThread(exceptionProxy, state);
@@ -551,8 +551,8 @@ public class PulsarFetcher<T> {
         return subscribedPartitionStates;
     }
 
-    protected ReaderThread createReaderThread(ExceptionProxy exceptionProxy, PulsarTopicState state) {
-        return new ReaderThread(
+    protected ReaderThread<T> createReaderThread(ExceptionProxy exceptionProxy, PulsarTopicState state) {
+        return new ReaderThread<>(
                 this,
                 state,
                 clientConf,

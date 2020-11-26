@@ -21,6 +21,7 @@ import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.util.Collector;
 
 import org.apache.pulsar.client.api.Message;
+import org.apache.pulsar.client.api.Schema;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -32,7 +33,7 @@ import java.io.Serializable;
  * @param <T> The type created by the keyed deserialization schema.
  */
 @PublicEvolving
-public interface PulsarDeserializationSchema<T> extends Serializable, ResultTypeQueryable<T> {
+public interface PulsarDeserializationSchema<T> extends PulsarContextAware<T>, Serializable {
 
     default void open(DeserializationSchema.InitializationContext context) throws Exception{
     };
@@ -73,6 +74,9 @@ public interface PulsarDeserializationSchema<T> extends Serializable, ResultType
         out.collect(deserialize(message));
     };
 
+    static <V> PulsarDeserializationSchemaBuilder<V> builder(){
+       return new PulsarDeserializationSchemaBuilder<>();
+    }
     /**
      * Wraps a Flink {@link DeserializationSchema} to a {@link PulsarDeserializationSchema}.
      *
@@ -82,6 +86,11 @@ public interface PulsarDeserializationSchema<T> extends Serializable, ResultType
      */
     static <V> PulsarDeserializationSchema<V> valueOnly(DeserializationSchema<V> valueDeserializer) {
         return new PulsarDeserializationSchema<V>() {
+            @Override
+            public Schema<V> getSchema() {
+                return null;
+            }
+
             @Override
             public void deserialize(Message<V> message, Collector<V> collector) throws IOException {
                 valueDeserializer.deserialize(message.getData(), collector);

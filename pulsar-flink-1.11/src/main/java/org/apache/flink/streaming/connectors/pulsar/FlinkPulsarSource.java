@@ -489,7 +489,7 @@ public class FlinkPulsarSource<T>
     }
 
     protected PulsarFetcher<T> createFetcher(
-            SourceContext sourceContext,
+            SourceContext<T> sourceContext,
             Map<TopicRange, MessageId> seedTopicsWithInitialOffsets,
             SerializedValue<AssignerWithPeriodicWatermarks<T>> watermarksPeriodic,
             SerializedValue<AssignerWithPunctuatedWatermarks<T>> watermarksPunctuated,
@@ -500,7 +500,7 @@ public class FlinkPulsarSource<T>
 
         readerConf.putIfAbsent(PulsarOptions.SUBSCRIPTION_ROLE_OPTION_KEY, getSubscriptionName());
 
-        return new PulsarFetcher(
+        return new PulsarFetcher<>(
                 sourceContext,
                 seedTopicsWithInitialOffsets,
                 watermarksPeriodic,

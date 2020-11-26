@@ -79,7 +79,7 @@ public class PulsarDeserializationSchemaWrapper<T> implements PulsarDeserializat
             si.setName("Record");
             si.setSchema(schemaBytes);
             si.setType(SchemaType.AVRO);
-        }else if (deSerializationSchema instanceof JsonNodeDeserializationSchema){
+        } else if (deSerializationSchema instanceof JsonNodeDeserializationSchema){
                 final org.apache.avro.Schema schema = AvroSchemaConverter.convertToSchema(dataType.getLogicalType());
                 byte[] schemaBytes = schema.toString().getBytes(StandardCharsets.UTF_8);
                 si.setName("Record");

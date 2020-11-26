@@ -18,10 +18,19 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.ClosureCleaner;
 import org.apache.flink.formats.avro.AvroSerializationSchema;
+import org.apache.flink.formats.avro.typeutils.AvroSchemaConverter;
+import org.apache.flink.formats.json.JsonNodeDeserializationSchema;
 import org.apache.flink.streaming.connectors.pulsar.TopicKeyExtractor;
 
+import org.apache.flink.streaming.connectors.pulsar.util.TypeInformationUtils;
+import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.RawType;
+import org.apache.flink.table.types.logical.TypeInformationRawType;
+import org.apache.flink.types.Row;
 import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.TypedMessageBuilder;
 import org.apache.pulsar.client.impl.schema.BytesSchema;
@@ -83,6 +92,14 @@ public class PulsarSerializationSchemaWrapper<T> implements PulsarSerializationS
             si.setName("Record");
             si.setSchema(schemaBytes);
             si.setType(SchemaType.AVRO);
+        } else if (serializationSchema instanceof JsonNodeDeserializationSchema){
+            final TypeInformation<Row> row = TypeInformationUtils.getTypesAsRow(recordClazz);
+            final DataType dataType = DataTypes.RAW(row).bridgedTo(recordClazz);
+            final org.apache.avro.Schema schema = AvroSchemaConverter.convertToSchema(dataType.getLogicalType());
+            byte[] schemaBytes = schema.toString().getBytes(StandardCharsets.UTF_8);
+            si.setName("Record");
+            si.setSchema(schemaBytes);
+            si.setType(SchemaType.JSON);
         }
         return new FlinkSchema<>(si, serializationSchema, null);
     }
