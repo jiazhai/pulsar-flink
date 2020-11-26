@@ -88,7 +88,7 @@ public interface PulsarDeserializationSchema<T> extends PulsarContextAware<T>, S
         return new PulsarDeserializationSchema<V>() {
             @Override
             public Schema<V> getSchema() {
-                return null;
+                return new FlinkSchema<>(Schema.BYTES.getSchemaInfo(),null, valueDeserializer);
             }
 
             @Override

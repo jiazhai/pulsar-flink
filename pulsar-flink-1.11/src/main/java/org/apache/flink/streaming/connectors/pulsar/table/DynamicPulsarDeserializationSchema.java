@@ -20,6 +20,7 @@ package org.apache.flink.streaming.connectors.pulsar.table;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.streaming.util.serialization.FlinkSchema;
 import org.apache.flink.streaming.util.serialization.PulsarDeserializationSchema;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -29,6 +30,8 @@ import org.apache.flink.util.Collector;
 import org.apache.flink.util.Preconditions;
 
 import org.apache.pulsar.client.api.Message;
+import org.apache.pulsar.client.api.Schema;
+import org.apache.pulsar.common.schema.SchemaInfo;
 
 import javax.annotation.Nullable;
 
@@ -130,6 +133,11 @@ class DynamicPulsarDeserializationSchema implements PulsarDeserializationSchema<
 	@Override
 	public TypeInformation<RowData> getProducedType() {
 		return producedTypeInfo;
+	}
+
+	@Override
+	public Schema<RowData> getSchema() {
+		return new FlinkSchema<>(Schema.BYTES.getSchemaInfo(),null, valueDeserialization);
 	}
 
 	// --------------------------------------------------------------------------------------------

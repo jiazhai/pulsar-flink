@@ -44,35 +44,4 @@ public interface PulsarSerializationSchema<T> extends PulsarContextAware<T>,Seri
      */
     default void open(SerializationSchema.InitializationContext context) throws Exception {
     }
-
-    /**
-     * Wraps a Flink {@link SerializationSchema} to a {@link PulsarSerializationSchema}.
-     *
-     * @param valueSerializer the serializer class used to serialize the value.
-     * @param <V>             the value type.
-     * @return A {@link PulsarSerializationSchema} that deserialize the value with the given deserializer.
-     */
-    static <V> PulsarSerializationSchema<V> valueOnly(SerializationSchema<V> valueSerializer) {
-        return new PulsarSerializationSchema<V>() {
-            @Override
-            public TypeInformation<V> getProducedType() {
-                return null;
-            }
-
-            @Override
-            public Schema<V> getSchema() {
-                return null;
-            }
-
-            @Override
-            public void open(SerializationSchema.InitializationContext context) throws Exception {
-                valueSerializer.open(context);
-            }
-
-            @Override
-            public void serialize(V element, TypedMessageBuilder<V> messageBuilder) {
-                messageBuilder.value(element);
-            }
-        };
-    }
 }
